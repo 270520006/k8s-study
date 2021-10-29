@@ -287,7 +287,7 @@ nginx-deployment   0/0     0            0           4h44m
 
 ## 重要概念
 
-### cluster
+### Cluster
 
 >​	资源的集合。我们的k8s利用这些资源运行各种基于容器的应用。
 
@@ -297,7 +297,108 @@ nginx-deployment   0/0     0            0           4h44m
 >
 >为了高可用，也可以运行多个master。
 
-### nodes
+### Nodes
 
 >来负责运行容器应用。
 >Node是由Master去管理的，负责监控和容器状态的汇报。
+
+### Pod
+
+>是k8s最小的工作单元，包含1 or N个容器
+>
+>pod使用方式：
+>
+>* 一个pod运行一个容器
+>  * 最常用情况
+>* 一个pod运行多个容器：
+>  * 一定是非常紧密相关的一组容器，并且需要资源的共享。
+>  * 一起启动、一起停止。
+
+### controller
+
+Controller ——>负责k8s运行容器的
+
+>k8s通过它来管理Pod
+>针对不同的业务场景，k8s提供了多种Controller，其中包含:Deployment、ReplicaSet、DaemonSet、StatefulSet、 Job
+
+* Deployment(默认创建)
+
+>就是我们最常用的Controller。它可以管理Pod的多个副本。(即:--replicas=3)，并且可以确保Pod按照期望的状态去运行。
+
+* ReplicaSet(默认创建)
+
+>我们使用deployment的时候，会自动的创建ReplicaSet，最终是有ReplicaSet去创建的pod，而我们并不是去直接的使用它。
+
+* DaemonSet
+
+>用于每个Node最多只运行一个Pod副本的创建。
+
+* StatefulSet
+
+>保证副本按照固定的顺序启动、更新、删除。
+
+### Service
+
+Service ——>负责k8s访问容器的。
+
+>为Pod提供负载均衡、固定IP和Port。
+>
+>pod是不稳定的，ip会变化的。所以我们需要一个固定ip或port。
+>
+>区别：
+>
+>Controller ——>负责k8s运行容器的
+>
+>Service——>负责k8s访问容器的。
+
+### Namespace
+
+>主要目的：资源隔离。
+
+### 总结
+
+* Cluster——是计算、存储和网络资源的集合
+* Master———Cluster的大脑,决定将应用放在哪里运行
+* Node——职责是运行容器应用
+* Pod———k8s的最小工作单元，包含1orN个容器。Controller——k8s通过它来管理Pod
+* 包含:Deployment、ReplicaSet、DaemonSet、StatefulSet、Job
+* Service———为Pod提供了负载均衡、固定的IP和Port
+* Namespace——解决同一个Cluster中，如何区别分开Controller、
+* Pod等资源的问题
+
+## K8S架构
+
+使用命令查找对应组件：Master和node对应组件如下
+
+```shell
+[test@localhost /]$ kubectl get pod --all-namespaces
+```
+
+![image-20211029164257898](k8s-study/image-20211029164257898.png)
+
+查看上图可以得出两个结论：
+
+* Kubernetes的系统组件都被放到kube-system的namespace中。
+* kubelet是唯一没有以容器形式运行的Kubernetes组件。（没有pod）
+
+### 部署流程
+
+当我们执行部署应用并指定两个副本的时候，执行流程如下所示：
+
+* Kubectl发送部署请求到API Server。（向k8s提供请求的）
+* API Server通知Controller Manager创建一个deployment资源。
+* Scheduler热行调度任务，将两个副本Pod分发到node1和node2上。
+* node1和node2上的kubectl在各自的节点上创建并运行Pod。
+
+示例：
+
+```shell
+[test@localhost root]$ kubectl scale deployments/my-nginx --replicas=2
+```
+
+k8s架构中，主要是由Master和Node组成的。下面我们来针对这两部分进行详细的介绍。
+
+### Master和Node的组成
+
+
+
