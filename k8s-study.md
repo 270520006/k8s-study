@@ -388,7 +388,7 @@ Service ——>负责k8s访问容器的。
 * Kubectl发送部署请求到API Server。（向k8s提供请求的）
 * API Server通知Controller Manager创建一个deployment资源。
 * Scheduler热行调度任务，将两个副本Pod分发到node1和node2上。
-* node1和node2上的kubectl在各自的节点上创建并运行Pod。
+* node1和node2上的kubelet在各自的节点上创建并运行Pod。
 
 示例：
 
@@ -400,5 +400,103 @@ k8s架构中，主要是由Master和Node组成的。下面我们来针对这两�
 
 ### Master和Node的组成
 
+下面将分成两部分讲解Master和Node的组成：
 
+#### Master
+
+* API-Server
+
+>属于前段交互接口。提供基于Http/Https RESTful API。
+>
+>主要功能：接受对应的指令。
+
+* Scheduler
+
+>负责决定将pod放到哪个Node上去运行的。
+
+* Controller Manager
+
+>非常关键的组件。管理cluster的各种资源。
+
+![image-20211101104707086](k8s-study/image-20211101104707086.png)
+
+* etcd
+
+>基于内存。负责保存k8s的配置信息和各种资源的状态信息。
+>
+>服务通知：如果数据发生变化，例如pod状态变化了，etcd会快速通知相关组件。
+
+* Pod网络
+
+#### Node
+
+* kubelet
+
+>创造和运行容器
+
+* kube-proxy
+
+>负责我们请求的转发。
+>
+>如果对于多个副本，它会实现负载均衡。
+
+![image-20211101104537698](k8s-study/image-20211101104537698.png)
+
+### Deployment
+
+​	deployment属于Master里的Controller Manager中replication的生命周期中。
+
+#### 创建资源
+
+* 方式1：
+
+kubectl命令直接创建。
+比如:（过期,已经废弃）
+
+```shell
+kubectl run nginx-deployment --image=nginx:1.7.9 --replicas=2
+```
+
+在命令行中通过参数指定资源的属性。(但是，在K8S v1.18.0l后，一replicas已弃用,推荐用kubectl apply创建pods)
+比如:
+
+```shell
+[test@localhost /]$ kubectl create deployment test-nginx --image nginx:1.7.9 --replicas=2
+
+deployment.apps/test-nginx created
+```
+
+缺陷：配置不全。
+
+* 方式2：
+
+通过配置文件和kubectl apply创建。
+
+步骤︰
+
+>* 编写yml配置文件。(下一页有书写样例, nginx.yml)
+>* 执行命令: 
+
+```shell
+ kubectl apply -f /home/muse/nginx.yml
+```
+
+举例：
+
+#### 构建过程解析
+
+用户通过kubectl-->使用yml文件创建Deployment-->创建ReplicaSet-->创建Pod（也就是说系统帮我们创建了pod）
+
+![image-20211101170359857](k8s-study/image-20211101170359857.png)
+
+
+
+#### 删除资源
+
+* 删除deployment
+
+```shell
+[test@localhost /]$ kubectl delete deploy test-nginx --namespace=default
+deployment.apps "test-nginx" deleted
+```
 
