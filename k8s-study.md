@@ -300,7 +300,7 @@ nginx-deployment   0/0     0            0           4h44m
 ### Nodes
 
 >来负责运行容器应用。
->Node是由Master去管理的，负责监控和容器状态的汇报。
+>Node是由Master去管理的，负责监控和容器状态的汇报。一个虚拟机上的k8s就是一个node。
 
 ### Pod
 
@@ -481,22 +481,388 @@ deployment.apps/test-nginx created
  kubectl apply -f /home/muse/nginx.yml
 ```
 
-举例：
-
-#### 构建过程解析
-
-用户通过kubectl-->使用yml文件创建Deployment-->创建ReplicaSet-->创建Pod（也就是说系统帮我们创建了pod）
-
-![image-20211101170359857](k8s-study/image-20211101170359857.png)
-
-
-
 #### 删除资源
+
+* 删除pod
+
+```shell
+[test@localhost k8s]$ kubectl delete  pods nginx-deployment-594554fc86-xmd5w 
+pod "nginx-deployment-594554fc86-xmd5w" deleted
+[test@localhost k8s]$ kubectl get pods 
+NAME                                READY   STATUS    RESTARTS   AGE
+my-nginx-b7d7bc74d-f5vcl            1/1     Running   5          5d2h
+my-nginx-b7d7bc74d-qlpv4            1/1     Running   5          5d2h
+nginx-app-7848d4b86f-g9k2v          1/1     Running   0          8h
+nginx-app-7848d4b86f-jxvw4          1/1     Running   0          8h
+nginx-deployment-594554fc86-4gz5v   0/1     Pending   0          13s
+nginx-deployment-7f4fc68488-6b2rm   1/1     Running   0          144m
+nginx-deployment-7f4fc68488-9pncf   1/1     Running   0          18m
+nginx-deployment-7f4fc68488-whplv   1/1     Running   0          144m
+```
 
 * 删除deployment
 
 ```shell
 [test@localhost /]$ kubectl delete deploy test-nginx --namespace=default
 deployment.apps "test-nginx" deleted
+```
+
+#### 修改资源
+
+* 修改pod的数量为3
+
+```shell
+[test@localhost root]$ kubectl scale deployments/my-nginx --replicas=3
+deployment.apps/my-nginx scaled
+```
+
+#### 查询资源
+
+* 查看信息（deployment，pods，service等，拼写可以不拼完）
+
+```shell
+[test@localhost k8s]$ kubectl get deploy
+[test@localhost k8s]$ kubectl get pods
+[test@localhost k8s]$ kubectl get service
+```
+
+* 查看略详细信息：多了ip等（加上-o wide即可）
+
+```shell
+[test@localhost k8s]$ kubectl get deploy -o wide
+```
+
+* 查看最详细信息
+
+```
+kubectl describe deployment nginx-app
+```
+
+#### 创建过程解析 
+
+ 用户通过kubectl-->使用yml文件创建Deployment-->创建ReplicaSet-->创建Pod（也就是说系统帮我们创建了pod）
+
+![image-20211101170359857](k8s-study/image-20211101170359857.png)
+
+​	这里我们查看一下nginx-app的创建过程：
+
+```shell
+[test@localhost k8s]$ kubectl describe deployment nginx-deployment
+```
+
+![image-20211102143554292](k8s-study/image-20211102143554292.png)
+
+跟踪replicaset，查看创建pod的过程：
+
+```shell
+[test@localhost k8s]$ kubectl describe rs  nginx-deployment-7f4fc68488
+```
+
+![image-20211102144449119](k8s-study/image-20211102144449119.png)
+
+跟踪pod，查看创建pod的过程：
+
+```shell
+[test@localhost k8s]$ kubectl describe pod  nginx-deployment-7f4fc68488-6b2rm
+```
+
+![image-20211102152048942](k8s-study/image-20211102152048942.png)
+
+### 集群下的K8S
+
+#### Failover机制
+
+在k8s中，一个node是一个虚拟机上的k8s整体，这里的node1和node2就是两台机子。
+
+这里模拟下node1故障的情况：
+
+* node1发生了错误/灾害/恶意破坏，故障了
+* 此时Master会维持pod数量依旧为3，所以会在node2下创建两个结点
+* 然后删除node1的两个结点
+  * 为防止Node1的突然连上，然后又要恢复pod数量为3。
+  * 为防止Node1因为网络频闪，反复进行删除和创建操作。
+* 此时node1为空，node2有三个pod，如果此时修改配置需要5个pods，则会优先创建在Node1上，维持平衡。
+
+ ![image-20211102153144934](k8s-study/image-20211102153144934.png)
+
+#### label标签
+
+​	默认配置下，Scheduler会将Pod调度到所有可用的Node（自动分配）。不过有些情况我们可以通过lable将Pod部署到指定的Node，比如将有大量磁盘I/O的Pod部署到配置了SSD的Node;或者Pod需要GPU,需要运行在配置了GPU的节点上。
+
+特别注意：Node表示一个虚拟机/物理机上的K8S，也就是我们一台机子上为固态SSD，我们可以打上标签，让其优先选择。
+
+**设置标签步骤：**
+
+* 查看所有node的标签情况。
+
+```shell
+[test@localhost k8s]$ kubectl get nodes --show-labels
+NAME       STATUS   ROLES    AGE    VERSION   LABELS
+minikube   Ready    master   5d6h   v1.19.0   beta.kubernetes.io/arch=amd64,beta.kubernetes.io/os=linux,kubernetes.io/arch=amd64,kubernetes.io/hostname=minikube,kubernetes.io/os=linux,minikube.k8s.io/commit=23aa1eb200a03ae5883dd9d453d4daf3e0f59668,minikube.k8s.io/name=minikube,minikube.k8s.io/updated_at=2021_10_27T18_07_49_0700,minikube.k8s.io/version=v1.13.0,node-role.kubernetes.io/master=
+```
+
+* 给node设置标签
+
+```shell
+[test@localhost k8s]$ kubectl label node minikube disktype=ssd
+node/minikube labeled
+[test@localhost k8s]$ kubectl get nodes --show-labels
+NAME       STATUS   ROLES    AGE    VERSION   LABELS
+minikube   Ready    master   5d6h   v1.19.0   beta.kubernetes.io/arch=amd64,beta.kubernetes.io/os=linux,disktype=ssd,kubernetes.io/arch=amd64,kubernetes.io/hostname=minikube,kubernetes.io/os=linux,minikube.k8s.io/commit=23aa1eb200a03ae5883dd9d453d4daf3e0f59668,minikube.k8s.io/name=minikube,minikube.k8s.io/updated_at=2021_10_27T18_07_49_0700,minikube.k8s.io/version=v1.13.0,node-role.kubernetes.io/master=
+```
+
+* 修改配置文件：加上以下内容
+
+>```yml
+>  nodeSelector:
+>    node: "disktype"
+>```
+
+文件总体为：
+
+```yml
+ # 内容
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+ name: nginx-deployment
+spec:
+  replicas: 3
+  selector:
+    matchLabels:
+      app: nginx
+  template:
+    metadata:
+      labels:
+        app: nginx
+    spec:
+      containers:
+      - name: nginx
+        image: nginx:1.17
+        ports:
+        - containerPort: 80
+      nodeSelector:
+        node: "disktype"
+```
+
+* 重新部署文件
+
+```shell
+[test@localhost k8s]$ kubectl apply -f nginx.yml
+deployment.apps/nginx-deployment configured
+```
+
+* 查看node的标签信息
+
+```shell
+[test@localhost k8s]$ kubectl get node --show-labels
+NAME       STATUS   ROLES    AGE    VERSION   LABELS
+minikube   Ready    master   5d6h   v1.19.0   beta.kubernetes.io/arch=amd64,beta.kubernetes.io/os=linux,disktype=ssd,kubernetes.io/arch=amd64,kubernetes.io/hostname=minikube,kubernetes.io/os=linux,minikube.k8s.io/commit=23aa1eb200a03ae5883dd9d453d4daf3e0f59668,minikube.k8s.io/name=minikube,minikube.k8s.io/updated_at=2021_10_27T18_07_49_0700,minikube.k8s.io/version=v1.13.0,node-role.kubernetes.io/master=
+```
+
+* 去掉指定标签
+
+```shell
+[test@localhost k8s]$ kubectl label node minikube disktype-
+node/minikube labeled
+
+[test@localhost k8s]$  kubectl get node --show-labels
+NAME       STATUS   ROLES    AGE    VERSION   LABELS
+minikube   Ready    master   5d6h   v1.19.0   beta.kubernetes.io/arch=amd64,beta.kubernetes.io/os=linux,kubernetes.io/arch=amd64,kubernetes.io/hostname=minikube,kubernetes.io/os=linux,minikube.k8s.io/commit=23aa1eb200a03ae5883dd9d453d4daf3e0f59668,minikube.k8s.io/name=minikube,minikube.k8s.io/updated_at=2021_10_27T18_07_49_0700,minikube.k8s.io/version=v1.13.0,node-role.kubernetes.io/master=
+```
+
+#### DaemonSet
+
+​	Deployment部署的副本Pod会分布在各个Node上，每个Node都可能运行好几个副本。DaemonSet的不同之处在于∶每个Node上最多只能运行一个副本。
+
+**DaemonSet的典型应用场景**
+
+* 在每个节点上运行存储Daemon，比如glusterd或ceph。
+* 在每个节点上运行日志收集Daemon，比如flunentd或logstash。
+* 在每个节点上运行监控Daemon，比如Prometheus Node Exporter或collectd.
+
+**查看使用daemonset的组件**
+
+* 查看k8s自己就用DaemonSet运行系统组件
+
+```shell
+[test@localhost k8s]$ kubectl get daemonset --namespace=kube-system
+NAME         DESIRED   CURRENT   READY   UP-TO-DATE   AVAILABLE   NODE SELECTOR            AGE
+kube-proxy   1         1         1       1            1           kubernetes.io/os=linux   5d7h
+```
+
+#### Job
+
+* 容器分类：工作类容器 / 服务器容器
+  * 服务器容器:服务类容器通常持续提供服务，需要一直运行，比如HTTP Server、Daemon等。Kubernetes的Deployment、
+    ReplicaSet和DaemonSet都用于管理服务类容器﹔
+  * 工作类容器:工作类容器是一次性任务，比如批处理程序，完成后容器就退出。对于工作类容器，我们使用Job。
+
+![image-20211102170555812](k8s-study/image-20211102170555812.png)
+
+##### 创建一个job
+
+* 编写一个myjob.yml
+
+```yml
+apiVersion: batch/v1
+kind: Job
+metadata:
+    name: myjob
+spec:
+  template:
+    metadata:
+        name: myjob
+    spec:
+      containers:
+      - name: hello
+        image: busybox
+        command: ["echo", "hello k8s job! "]
+        #command:["invalid_command"，"hello k8s job! "]
+      restartPolicy: Never
+#restartPolicy: OnFailure
+```
+
+* 创建job
+
+```shell
+[test@localhost k8s]$ kubectl apply -f myjob.yml 
+job.batch/myjob created
+```
+
+* 查看job
+
+```shell
+[test@localhost k8s]$ kubectl get jobs
+NAME    COMPLETIONS   DURATION   AGE
+myjob   1/1           8s         86s
+```
+
+* 查看pods里和其他的容器有什么不同
+  * 不同：READY是0/1,状态是Completed
+
+```
+[test@localhost k8s]$ kubectl get pods
+NAME                                READY   STATUS      RESTARTS   AGE
+my-nginx-b7d7bc74d-f5vcl            1/1     Running     5          5d3h
+my-nginx-b7d7bc74d-qlpv4            1/1     Running     5          5d3h
+myjob-488fp                         0/1     Completed   0          93s
+nginx-app-7848d4b86f-g9k2v          1/1     Running     0          9h
+nginx-app-7848d4b86f-jxvw4          1/1     Running     0          9h
+nginx-deployment-594554fc86-4gz5v   0/1     Pending     0          50m
+nginx-deployment-7f4fc68488-6b2rm   1/1     Running     0          3h14m
+nginx-deployment-7f4fc68488-9pncf   1/1     Running     0          68m
+nginx-deployment-7f4fc68488-whplv   1/1     Running     0          3h14m
+```
+
+* 查看日志的输出情况
+
+```shell
+[test@localhost k8s]$ kubectl logs myjob-488fp
+hello k8s job! 
+```
+
+* 接下去修改文件变成失败的
+
+```yml
+apiVersion: batch/v1
+kind: Job
+metadata:
+    name: myjob
+spec:
+  template:
+    metadata:
+        name: myjob
+    spec:
+      containers:
+      - name: hello
+        image: busybox
+        #command: ["echo", "hello k8s job! "]
+        command:["invalid_command"，"hello k8s job! "]
+      restartPolicy: Never
+#restartPolicy: OnFailure
+```
+
+* 删除原本的job：发现都没有了
+
+```shell
+[test@localhost k8s]$ kubectl delete job myjob
+job.batch "myjob" deleted
+
+[test@localhost k8s]$ kubectl get job
+No resources found in default namespace.
+[test@localhost k8s]$ kubectl get pods
+NAME                                READY   STATUS    RESTARTS   AGE
+my-nginx-b7d7bc74d-f5vcl            1/1     Running   5          5d3h
+my-nginx-b7d7bc74d-qlpv4            1/1     Running   5          5d3h
+nginx-app-7848d4b86f-g9k2v          1/1     Running   0          9h
+nginx-app-7848d4b86f-jxvw4          1/1     Running   0          9h
+nginx-deployment-594554fc86-4gz5v   0/1     Pending   0          67m
+nginx-deployment-7f4fc68488-6b2rm   1/1     Running   0          3h31m
+nginx-deployment-7f4fc68488-9pncf   1/1     Running   0          85m
+nginx-deployment-7f4fc68488-whplv   1/1     Running   0          3h31m
+```
+
+* 运行job并查看
+  * 会发现运行了三个job，这是因为：
+    * 我们的重启策略是 restartPolicy: Never，无法运行且无法重启就只能一直创建出新的
+
+```shell
+[test@localhost k8s]$ kubectl apply -f myjob.yml 
+job.batch/myjob created
+
+[test@localhost k8s]$ kubectl get job
+NAME    COMPLETIONS   DURATION   AGE
+myjob   0/1           14s        14s
+
+[test@localhost k8s]$ kubectl get pods
+NAME                                READY   STATUS               RESTARTS   AGE
+myjob-74dg2                         0/1     ContainerCreating    0          3s
+myjob-9f57n                         0/1     ContainerCannotRun   0          13s
+myjob-qbmb4                         0/1     ContainerCannotRun   0          19s
+
+[test@localhost k8s]$ kubectl get pods
+NAME                                READY   STATUS               RESTARTS   AGE
+myjob-74dg2                         0/1     ContainerCannotRun   0          118s
+myjob-9f57n                         0/1     ContainerCannotRun   0          2m8s
+myjob-qbmb4                         0/1     ContainerCannotRun   0          2m14s
+myjob-shvf7                         0/1     ContainerCannotRun   0          18s
+myjob-vqms4                         0/1     ContainerCannotRun   0          98s
+
+```
+
+* 删除后修改 restartPolicy: Never为restartPolicy: OnFailure即可。
+  * OnFailure表示，失败后进行重启，不会无限创建容器。
+
+```shell
+apiVersion: batch/v1
+kind: Job
+metadata:
+    name: myjob
+spec:
+  template:
+    metadata:
+        name: myjob
+    spec:
+      containers:
+      - name: hello
+        image: busybox
+        #command: ["echo", "hello k8s job! "]
+        command: ["invalid_command","hello k8s job! "]
+      #restartPolicy: Never
+      restartPolicy: OnFailure
+```
+
+* 重新运行，容器没有再无限创建出来，采取的是重启方式
+
+```shell
+[test@localhost k8s]$ kubectl apply -f myjob.yml 
+job.batch/myjob created
+[test@localhost k8s]$ kubectl get pods
+NAME                                READY   STATUS              RESTARTS   AGE
+myjob-6q5ls                         0/1     RunContainerError   0          14s
+[test@localhost k8s]$ kubectl get pods
+NAME                                READY   STATUS              RESTARTS   AGE
+myjob-6q5ls                         0/1     RunContainerError   1          25s
 ```
 
