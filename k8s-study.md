@@ -866,3 +866,635 @@ NAME                                READY   STATUS              RESTARTS   AGE
 myjob-6q5ls                         0/1     RunContainerError   1          25s
 ```
 
+##### 跑多个job
+
+* 先改配置文件
+
+```shell
+apiVersion: batch/v1
+kind: Job
+metadata:
+    name: myjob
+spec:
+  #创建6个任务
+  completions: 6
+  template:
+    metadata:
+        name: myjob
+    spec:
+      containers:
+      - name: hello
+        image: busybox
+        #command: ["echo", "hello k8s job! "]
+        command: ["invalid_command","hello k8s job! "]
+      #restartPolicy: Never
+      restartPolicy: OnFailure
+```
+
+* 启动并查看job
+
+```shell
+[test@localhost k8s]$ kubectl apply -f myjob.yml 
+job.batch/myjob created
+[test@localhost k8s]$ kubectl get job
+NAME    COMPLETIONS   DURATION   AGE
+myjob   1/6           9s         9s
+[test@localhost k8s]$ kubectl get pods
+NAME                                READY   STATUS              RESTARTS   AGE
+myjob-88wpb                         0/1     Completed           0          19s
+myjob-cvqd9                         0/1     Completed           0          8s
+myjob-jx67v                         0/1     ContainerCreating   0          2s
+myjob-vhhb6                         0/1     Completed           0          13s
+```
+
+##### 并行job
+
+* 写yml配置文件：并行创建2个任务，分三组，一次同时执行2个，执行三次
+
+```yml
+apiVersion: batch/v1
+kind: Job
+metadata:
+    name: myjob
+spec:
+  #创建6个任务
+  #completions: 6
+  #并行创建2个任务，分三组，一次同时执行2个，执行三次
+  parallelism: 2
+  template:
+    metadata:
+        name: myjob
+    spec:
+      containers:
+      - name: hello
+        image: busybox
+        command: ["echo", "hello k8s job! "]
+        #command: ["invalid_command","hello k8s job! "]
+      #restartPolicy: Never
+      restartPolicy: OnFailure
+```
+
+* 运行任务并且查看pods和job
+
+```shell
+[test@localhost k8s]$ kubectl apply -f myjob.yml 
+job.batch/myjob created
+[test@localhost k8s]$ kubectl get pods
+NAME                                READY   STATUS              RESTARTS   AGE
+myjob-mcqsw                         0/1     ContainerCreating   0          7s
+myjob-pgjcn                         0/1     ContainerCreating   0          7s
+[test@localhost k8s]$ kubectl get jobs
+NAME    COMPLETIONS   DURATION   AGE
+myjob   2/1 of 2      12s        13s
+```
+
+* 尝试运行6个任务并行2个
+
+```shell
+[test@localhost k8s]$ kubectl apply -f myjob.yml 
+job.batch/myjob created
+[test@localhost k8s]$ kubectl get jobs
+NAME    COMPLETIONS   DURATION   AGE
+myjob   3/6           18s        18s
+[test@localhost k8s]$ kubectl get pods
+NAME                                READY   STATUS      RESTARTS   AGE
+myjob-4x2fb                         0/1     Completed   0          14s
+myjob-5nbg2                         0/1     Completed   0          23s
+myjob-cskdt                         0/1     Completed   0          10s
+myjob-d7h7n                         0/1     Completed   0          17s
+myjob-z5ntw                         0/1     Completed   0          29s
+myjob-zcq26                         0/1     Completed   0          29s
+```
+
+##### 定时任务
+
+* 编写yml文件
+
+```yml
+apiVersion: batch/v2alpha1
+kind: CronJob
+metadata:
+    name: CronJob
+spec:
+  schedule: "*/1 * * * *"
+  jobTemplate:
+   spec:
+    template:
+      spec:
+        containers:
+       - name: hello
+         image: busybox
+         command: ["echo", "hello k8s job! "]
+         #command: ["invalid_command","hello k8s job! "]
+      #restartPolicy: Never
+       restartPolicy: OnFailure
+```
+
+* 运行yml配置文件报错 （bug又来了）
+
+```shell
+[test@localhost k8s]$ kubectl apply -f MyCronJob.yml 
+error: unable to recognize "MyCronJob.yml": no matches for kind "CronJob" in version "batch/v2alpha1"
+```
+
+* 使用指令，查看当前版本
+
+```shell
+[test@localhost k8s]$ kubectl api-versions
+admissionregistration.k8s.io/v1
+admissionregistration.k8s.io/v1beta1
+apiextensions.k8s.io/v1
+apiextensions.k8s.io/v1beta1
+apiregistration.k8s.io/v1
+apiregistration.k8s.io/v1beta1
+。。。。。。
+```
+
+* 进入k8s的配置类，`/etc/kubernetes/manifests/kube-apiserver.yaml，`找来找去并没有，manifests是个空文件夹！！！
+  * 是一个巨坑，我找了一早上。通过csdn，掘金，到stackoverflow，甚至github仓库里的issue里，始终没有得到满意的答复。
+  * 后面我想了下，minikube也是一个容器，会不会是在容器中！使用命令即可：
+  * 最后，我如愿找到了这个坑爹的文件
+
+```shell
+[test@localhost manifests]$ docker exec -it minikube bash
+root@minikube:/# ls
+Release.key                 bin   data  etc   kic.txt  lib    lib64   media  opt   root  sbin  sys  usr
+afbjorklund-public.key.asc  boot  dev   home  kind     lib32  libx32  mnt    proc  run   srv   tmp  var
+root@minikube:/# cd etc/k
+kernel/     kubernetes/ 
+root@minikube:/# cd etc/kubernetes/manifests/
+root@minikube:/etc/kubernetes/manifests# ls
+etcd.yaml  kube-apiserver.yaml  kube-controller-manager.yaml  kube-scheduler.yaml
+```
+
+* 追加进文件中，由于容器没有vi也没有vim，所以直接追加进去。
+  * 先用cat获取要插入的行数
+  * 在要插入的行数中使用
+
+```shell
+root@minikube:/etc/kubernetes/manifests# cat -n  kube-apiserver.yaml 
+root@minikube:/etc/kubernetes/manifests# sed -i '16i\    - --runtime-config=batch/v2alpha1=true;' kube-apiserver.yaml
+```
+
+* 修改完毕重启后，再出一个bug
+
+```shell
+[root@localhost k8s]# kubectl get pods
+The connection to the server localhost:8080 was refused - did you specify the right host or port?
+```
+
+* 重新返回test用户发现可以使用了，这东西真的bug多。
+
+* 最后我发现第二个方法，不用去改配置文件，只要把版本号改一下就可以了。
+
+```yml
+[test@localhost k8s]$ vim MyCronJob.yml
+apiVersion: batch/v1beta1
+kind: CronJob
+metadata:
+  name: hello
+spec:
+  schedule: "*/1 * * * *"
+  jobTemplate:
+    spec:
+      template:
+        spec:
+          containers:
+          - name: hello
+            image: busybox
+            args:
+            - /bin/sh
+            - -c
+            - date; echo Hello from the Kubernetes cluster
+          restartPolicy: OnFailure
+```
+
+* 执行并查看情况
+  * 查看cronjobs：会发现每过1分钟会运行一次定时任务
+  * 查看jobs：运行3分钟，产生了3条记录
+  * 查看pods：也会出现
+
+```shell
+[test@localhost k8s]$ kubectl apply -f MyCronJob.yml
+[test@localhost k8s]$ kubectl get cronjobs
+NAME    SCHEDULE      SUSPEND   ACTIVE   LAST SCHEDULE   AGE
+hello   */1 * * * *   False     0        36s             3m23s
+[test@localhost k8s]$ kubectl get job
+NAME               COMPLETIONS   DURATION   AGE
+hello-1635919080   1/1           6s         2m13s
+hello-1635919140   1/1           6s         73s
+hello-1635919200   1/1           10s        13s
+myjob              6/6           27s        3h52m
+[test@localhost k8s]$ kubectl get pods
+NAME                                READY   STATUS      RESTARTS   AGE
+hello-1635919740-466cw              0/1     Completed   0          2m59s
+hello-1635919800-zt4ll              0/1     Completed   0          119s
+hello-1635919860-h8h64              0/1     Completed   0          59s
+```
+
+#### Service
+
+* 我们不应该期望Pod是健壮的，而是要假设Pod中的容器很可能因为各种原因发生故障而死棹。
+* Deployment等Controller会通过动态创建和销毁Pod来保证应用整体的健壮性。换句话说，Pod是脆弱的，但应用是健壮的。
+* Service提供了固定的ip和端口，并且里面包含一组pod，即使Pod的ip发生变化，但是面对客户端的是Service的固定ip和端口。
+
+##### service打包pods
+
+* 编写配置文件
+
+```yml
+ # 内容
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+ name: httpd
+spec:
+#创建三个容器
+  replicas: 3
+  selector:
+    matchLabels:
+      run: httpd
+  template:
+    metadata:
+      labels:
+        run: httpd
+    spec:
+      containers:
+      - name: nginx
+        image: nginx
+        ports:
+        #开启80端口
+        - containerPort: 80
+```
+
+* 使用配置文件跑三个容器起来
+
+```shell
+[test@localhost k8s]$ kubectl apply -f httpd.yml 
+deployment.apps/httpd created
+[test@localhost k8s]$ kubectl get pods
+NAME                                READY   STATUS              RESTARTS   AGE
+httpd-5cbd65d46c-7l55b              0/1     ContainerCreating   0          41s
+httpd-5cbd65d46c-7tln6              0/1     ContainerCreating   0          41s
+httpd-5cbd65d46c-hs5hc              0/1     ContainerCreating   0          41s
+```
+
+* 写一个service配置文件用来打包这三个pod
+  * 这里特别注意，selector要和所要打包的selector对应起来。
+
+```yml
+# 内容
+apiVersion: v1
+kind: Service
+metadata:
+ name: httpd-svc
+spec:
+  selector:
+#选择器决定了绑定的pods，对应的pods的要和他一样。
+    run: httpd
+  ports:
+  - protocol: TCP
+    port: 8080
+    targetPort: 80
+```
+
+* 执行httpdSVC.yml，可以执行curl 8080端口查看是否能够访问
+
+```shell
+[test@localhost k8s]$ kubectl apply -f httpdSVC.yml 
+service/httpd-svc created
+[test@localhost k8s]$ kubectl get svc
+NAME            TYPE        CLUSTER-IP      EXTERNAL-IP   PORT(S)        AGE
+httpd-svc       ClusterIP   10.111.147.9    <none>        8080/TCP       63s
+[test@localhost k8s]$ curl 10.111.147.9:8080
+```
+
+* 查看service是否绑定上了pods：发现确实是以8080端口绑定上了3个容器的80端口
+
+```shell
+[test@localhost k8s]$ kubectl describe service httpd-svc
+Name:              httpd-svc
+Namespace:         default
+Labels:            <none>
+Annotations:       <none>
+Selector:          run=httpd
+Type:              ClusterIP
+IP:                10.111.147.9
+Port:              <unset>  8080/TCP
+TargetPort:        80/TCP
+Endpoints:         172.18.0.11:80,172.18.0.13:80,172.18.0.14:80
+Session Affinity:  None
+Events:            <none>
+[test@localhost k8s]$ kubectl get pods -o wide 
+NAME                                READY   STATUS    RESTARTS   AGE     IP            NODE       NOMINATED NODE   READINESS GATES
+httpd-c794d9c5f-6rpws               1/1     Running   0          30m     172.18.0.13   minikube   <none>           <none>
+httpd-c794d9c5f-drf4q               1/1     Running   0          30m     172.18.0.14   minikube   <none>           <none>
+httpd-c794d9c5f-r7vv9               1/1     Running   0          30m     172.18.0.11   minikube   <none>           <none>
+```
+
+* 通过iptables查看映射规则（要切回root用户）
+
+```shell
+[root@localhost k8s]# iptables-save 
+```
+
+* 通过涂白的KUBE-SVC进行链接pods，跳转规则：
+  * 一开始容器跳转概率为1/3
+  * 第二个容器跳转概率为：(1-第一个容器的跳转概率)*0.5
+  * 第三个容器为剩下概率
+
+![image-20211103164643027](k8s-study/image-20211103164643027.png)
+
+![image-20211103164757611](k8s-study/image-20211103164757611.png)
+
+#### Rolling Update
+
+​	滚动更新是一次只更新一小部分副本，成功后再更新更多的副本，最终完成所有副本的更新。滚动更新的最大好处是零停机，整个更新过程始终有副本在运行，从而保证了业务的连续性。
+
+![image-20211103170943084](k8s-study/image-20211103170943084.png)
+
+##### 滚动更新
+
+* 先用yml创建一个低版本nginx的pods
+
+```yml
+ # 内容
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+ name: httpd
+spec:
+#创建三个容器
+  replicas: 3
+  selector:
+    matchLabels:
+      run: httpd
+  template:
+    metadata:
+      labels:
+        run: httpd
+    spec:
+      containers:
+      - name: nginx:1.17
+        image: nginx:1.17
+        ports:
+        #开启80端口
+        - containerPort: 80
+```
+
+* 执行文件
+
+```shell
+[test@localhost k8s]$ kubectl apply -f httpdRollingUpdate.yml 
+deployment.apps/httpd configured
+[test@localhost k8s]$ kubectl get deployment -o wide 
+NAME               READY   UP-TO-DATE   AVAILABLE   AGE     CONTAINERS   IMAGES         SELECTOR
+httpd              3/3     3            3           112m    nginx        nginx:1.17     run=httpd
+[test@localhost k8s]$ kubectl get pods 
+NAME                                READY   STATUS    RESTARTS   AGE
+httpd-5575684c56-2l6rb              1/1     Running   0          3m33s
+httpd-5575684c56-6nv2g              1/1     Running   0          3m16s
+httpd-5575684c56-cjqcz              1/1     Running   0          3m26s
+```
+
+* 修改配置文件
+
+```yml
+ # 内容
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+ name: httpd
+spec:
+#创建三个容器
+  replicas: 3
+  selector:
+    matchLabels:
+      run: httpd
+  template:
+    metadata:
+      labels:
+        run: httpd
+    spec:
+      containers:
+      - name: nginx
+        image: nginx:1.21.3
+        ports:
+        #开启80端口
+        - containerPort: 80
+```
+
+* 重新跑一次apply：由于本地有镜像，所以整个过程非常快，但是没事，我们去deployment看
+
+```shell
+[test@localhost k8s]$ kubectl apply -f  httpdRollingUpdate.yml 
+deployment.apps/httpd configured
+[test@localhost k8s]$  kubectl get deployment -o wide 
+NAME               READY   UP-TO-DATE   AVAILABLE   AGE     CONTAINERS   IMAGES         SELECTOR
+httpd              3/3     3            3           124m    nginx        nginx:1.21.3   run=httpd
+my-nginx           1/1     1            1           6d21h   nginx        nginx:latest   app=my-nginx
+nginx-app          1/1     1            1           2d      nginx        nginx          app=nginx
+nginx-deployment   1/1     1            1           42h     nginx        nginx:1.17     app=nginx
+[test@localhost k8s]$ kubectl get pods
+NAME                                READY   STATUS        RESTARTS   AGE
+httpd-5575684c56-2l6rb              0/1     Terminating   0          16m
+httpd-5c9954f4f4-dbdkg              1/1     Running       0          12s
+httpd-5c9954f4f4-qk6z2              1/1     Running       0          24s
+httpd-5c9954f4f4-sbhgn              1/1     Running       0          18s
+```
+
+* 使用describe查看deployment
+
+```shell
+[test@localhost k8s]$ kubectl describe deployment httpd
+Events:
+  Type    Reason             Age    From                   Message
+  ----    ------             ----   ----                   -------
+  Normal  ScalingReplicaSet  17m    deployment-controller  Scaled up replica set httpd-5575684c56 to 1
+  Normal  ScalingReplicaSet  17m    deployment-controller  Scaled down replica set httpd-c794d9c5f to 2
+  Normal  ScalingReplicaSet  17m    deployment-controller  Scaled up replica set httpd-5575684c56 to 2
+  Normal  ScalingReplicaSet  17m    deployment-controller  Scaled down replica set httpd-c794d9c5f to 1
+  Normal  ScalingReplicaSet  17m    deployment-controller  Scaled up replica set httpd-5575684c56 to 3
+  Normal  ScalingReplicaSet  17m    deployment-controller  Scaled down replica set httpd-c794d9c5f to 0
+  Normal  ScalingReplicaSet  2m15s  deployment-controller  Scaled up replica set httpd-5c9954f4f4 to 1
+  Normal  ScalingReplicaSet  2m9s   deployment-controller  Scaled down replica set httpd-5575684c56 to 2
+  Normal  ScalingReplicaSet  2m9s   deployment-controller  Scaled up replica set httpd-5c9954f4f4 to 2
+  Normal  ScalingReplicaSet  2m3s   deployment-controller  Scaled down replica set httpd-5575684c56 to 1
+  Normal  ScalingReplicaSet  2m3s   deployment-controller  Scaled up replica set httpd-5c9954f4f4 to 3
+  Normal  ScalingReplicaSet  116s   deployment-controller  Scaled down replica set httpd-5575684c56 to 0
+[test@localhost k8s]$ kubectl get replicasets
+NAME                          DESIRED   CURRENT   READY   AGE
+httpd-5575684c56              0         0         0       91m
+httpd-5c9954f4f4              3         3         3       76m
+```
+
+这里来解析一下events：
+
+* 刚开始由ReplicaSet的httpd-5575684c56管理三个老旧的容器
+* 发布了新版本更新后，replicaset会将依次将容器进行更新然后发布，这就是滚动更新。
+
+#####  更新回滚
+
+* 先创建三个配置类，当成三个版本：
+
+v1版本
+
+```yml
+ # 内容
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+ name: httpd
+spec:
+#创建三个容器
+  replicas: 3
+  selector:
+    matchLabels:
+      run: httpd
+  template:
+    metadata:
+      labels:
+        run: httpd
+    spec:
+      containers:
+      - name: nginx
+        image: nginx:1.21.1
+        ports:
+        #开启80端口
+        - containerPort: 80
+```
+
+v2版本
+
+```shell
+ # 内容
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+ name: httpd
+spec:
+#创建三个容器
+  replicas: 3
+  selector:
+    matchLabels:
+      run: httpd
+  template:
+    metadata:
+      labels:
+        run: httpd
+    spec:
+      containers:
+      - name: nginx
+        image: nginx:1.21.2
+        ports:
+        #开启80端口
+        - containerPort: 80
+```
+
+v3版本
+
+```yml
+ # 内容
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+ name: httpd
+spec:
+#创建三个容器
+  replicas: 3
+  selector:
+    matchLabels:
+      run: httpd
+  template:
+    metadata:
+      labels:
+        run: httpd
+    spec:
+      containers:
+      - name: nginx
+        image: nginx:1.21.3
+        ports:
+        #开启80端口
+        - containerPort: 80
+```
+
+* 进行版本更新。要想版本回滚，一定要加上--record！！！
+
+```shell
+[test@localhost k8s]$ kubectl get deployment -o wide
+NAME               READY   UP-TO-DATE   AVAILABLE   AGE     CONTAINERS   IMAGES         SELECTOR
+httpd              3/3     3            3           88s     nginx        nginx:1.17     run=httpd
+my-nginx           1/1     1            1           6d23h   nginx        nginx:latest   app=my-nginx
+nginx-app          1/1     1            1           2d3h    nginx        nginx          app=nginx
+nginx-deployment   1/1     1            1           44h     nginx        nginx:1.17     app=nginx
+[test@localhost k8s]$ kubectl apply -f httpd_v2.yml --record
+deployment.apps/httpd configured
+[test@localhost k8s]$ kubectl get deployment -o wide
+NAME               READY   UP-TO-DATE   AVAILABLE   AGE     CONTAINERS   IMAGES         SELECTOR
+httpd              3/3     1            3           7m53s   nginx        nginx:1.21.2   run=httpd
+my-nginx           1/1     1            1           6d23h   nginx        nginx:latest   app=my-nginx
+nginx-app          1/1     1            1           2d3h    nginx        nginx          app=nginx
+nginx-deployment   1/1     1            1           44h     nginx        nginx:1.17     app=nginx
+[test@localhost k8s]$ kubectl apply -f httpd_v3.yml --record
+deployment.apps/httpd configured
+[test@localhost k8s]$ kubectl get deployment -o wide
+NAME               READY   UP-TO-DATE   AVAILABLE   AGE     CONTAINERS   IMAGES         SELECTOR
+httpd              3/3     3            3           9m12s   nginx        nginx:1.21.3   run=httpd
+my-nginx           1/1     1            1           6d23h   nginx        nginx:latest   app=my-nginx
+nginx-app          1/1     1            1           2d3h    nginx        nginx          app=nginx
+nginx-deployment   1/1     1            1           44h     nginx        nginx:1.17     app=nginx
+
+```
+
+* 进行版本回溯查看
+
+```shell
+[test@localhost k8s]$ kubectl rollout history deployment httpd
+deployment.apps/httpd 
+REVISION  CHANGE-CAUSE
+1         kubectl apply --filename=httpd_v1.yml --record=true
+2         kubectl apply --filename=httpd_v2.yml --record=true
+3         kubectl apply --filename=httpd_v3.yml --record=true
+```
+
+* 进行版本回溯
+
+```shell
+[test@localhost k8s]$ kubectl rollout undo deployment httpd --to-revision=1
+deployment.apps/httpd rolled back
+[test@localhost k8s]$ kubectl get deployment -o wide
+NAME               READY   UP-TO-DATE   AVAILABLE   AGE     CONTAINERS   IMAGES         SELECTOR
+httpd              3/3     3            3           14m     nginx        nginx:1.17     run=httpd
+my-nginx           1/1     1            1           6d23h   nginx        nginx:latest   app=my-nginx
+nginx-app          1/1     1            1           2d3h    nginx        nginx          app=nginx
+nginx-deployment   1/1     1            1           44h     nginx        nginx:1.17     app=nginx
+```
+
+* 当然想滚哪里就滚哪里，只要你有记录下来
+
+```shell
+[test@localhost k8s]$ kubectl get deployment -o wide
+NAME               READY   UP-TO-DATE   AVAILABLE   AGE     CONTAINERS   IMAGES         SELECTOR
+httpd              3/3     3            3           14m     nginx        nginx:1.17     run=httpd
+my-nginx           1/1     1            1           6d23h   nginx        nginx:latest   app=my-nginx
+nginx-app          1/1     1            1           2d3h    nginx        nginx          app=nginx
+nginx-deployment   1/1     1            1           44h     nginx        nginx:1.17     app=nginx
+[test@localhost k8s]$ kubectl rollout history deployment httpd
+deployment.apps/httpd 
+REVISION  CHANGE-CAUSE
+2         kubectl apply --filename=httpd_v2.yml --record=true
+3         kubectl apply --filename=httpd_v3.yml --record=true
+4         kubectl apply --filename=httpd_v1.yml --record=true
+
+[test@localhost k8s]$ kubectl rollout undo deployment httpd --to-revision=2
+deployment.apps/httpd rolled back
+[test@localhost k8s]$ kubectl get deployment -o wide
+NAME               READY   UP-TO-DATE   AVAILABLE   AGE     CONTAINERS   IMAGES         SELECTOR
+httpd              3/3     1            3           18m     nginx        nginx:1.21.2   run=httpd
+my-nginx           1/1     1            1           6d23h   nginx        nginx:latest   app=my-nginx
+nginx-app          1/1     1            1           2d3h    nginx        nginx          app=nginx
+nginx-deployment   1/1     1            1           44h     nginx        nginx:1.17     app=nginx
+
+```
+
+至此，k8s大部分都学完了 。

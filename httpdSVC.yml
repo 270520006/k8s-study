@@ -1,0 +1,13 @@
+# 内容
+apiVersion: v1
+kind: Service
+metadata:
+ name: httpd-svc
+spec:
+  selector:
+#选择器决定了绑定的pods，对应的pods的要和他一样。
+    run: httpd
+  ports:
+  - protocol: TCP
+    port: 8080
+    targetPort: 80

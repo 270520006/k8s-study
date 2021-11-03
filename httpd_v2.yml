@@ -1,0 +1,22 @@
+ # 内容
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+ name: httpd
+spec:
+#创建三个容器
+  replicas: 3
+  selector:
+    matchLabels:
+      run: httpd
+  template:
+    metadata:
+      labels:
+        run: httpd
+    spec:
+      containers:
+      - name: nginx
+        image: nginx:1.21.2
+        ports:
+        #开启80端口
+        - containerPort: 80

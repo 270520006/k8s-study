@@ -1,0 +1,20 @@
+apiVersion: batch/v1
+kind: Job
+metadata:
+    name: myjob
+spec:
+  #创建6个任务
+  completions: 6
+  #并行创建2个任务，分三组，一次（逻辑上同时）执行2个，执行三次
+  parallelism: 2
+  template:
+    metadata:
+        name: myjob
+    spec:
+      containers:
+      - name: hello
+        image: busybox
+        command: ["echo", "hello k8s job! "]
+        #command: ["invalid_command","hello k8s job! "]
+      #restartPolicy: Never
+      restartPolicy: OnFailure
